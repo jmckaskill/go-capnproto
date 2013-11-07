@@ -31,11 +31,19 @@ const (
 	TypeList
 	TypePointerList
 	TypeBitList
+	TypeExport
+	TypePromise
 )
+
+type Connection interface {
+	Send(msg *Segment)
+	Receive() *Segment
+}
 
 type Message interface {
 	NewSegment(minsz int) (*Segment, error)
 	Lookup(segid uint32) (*Segment, error)
+	GetExportId(p Interface) uint32
 }
 
 type Segment struct {
@@ -52,6 +60,8 @@ type Object struct {
 	ptrs    int
 	typ     ObjectType
 	flags   uint
+	id uint32
+	exports []uint64
 }
 
 type Void struct{}
@@ -789,6 +799,7 @@ const (
 	structPointer    = 0
 	listPointer      = 1
 	farPointer       = 2
+	interfacePointer = 3
 	doubleFarPointer = 6
 
 	voidList      = 0
@@ -944,6 +955,8 @@ func (p Object) value(off int) uint64 {
 	switch p.typ {
 	case TypeStruct:
 		return structPointer | d | uint64(p.datasz/8)<<32 | uint64(p.ptrs)<<48
+	case TypeInterface:
+		return interfacePointer | d | uint64(p.datasz/8)<<32 | uint64(p.ptrs)<<48
 	case TypePointerList:
 		return listPointer | d | pointerList<<32 | uint64(p.length)<<35
 	case TypeList:
@@ -1005,7 +1018,7 @@ func (p Object) dataEnd() int {
 		return p.off + p.length*(p.datasz+p.ptrs*8)
 	case TypePointerList:
 		return p.off + p.length*8
-	case TypeStruct:
+	case TypeStruct, TypeInterface:
 		return p.off + p.datasz + p.ptrs*8
 	case TypeBitList:
 		return p.off + (p.length+7)/8
@@ -1123,6 +1136,9 @@ func (s *Segment) writePtr(off int, p Object, copies *rbtree.Tree, depth int) er
 				}
 			}
 
+		case TypeInterface:
+			ns.writeInterface(n.off, ps.readInterface(p.off))
+
 		case TypeList:
 			for i := 0; i < n.length; i++ {
 				o := i * (n.datasz + n.ptrs*8)
@@ -1182,4 +1198,201 @@ func (s *Segment) writePtr(off int, p Object, copies *rbtree.Tree, depth int) er
 		t.Data = t.Data[:len(t.Data)+16]
 		return nil
 	}
+}
+
+type Interface interface {
+	Exports(s Message, primary uint64) []uint64
+}
+
+type rtype struct {
+	size       uintptr        // copy
+	hash       uint32         // random
+	_          uint8          // zero
+	align      uint8          // copy
+	fieldAlign uint8          // copy
+	kind       uint8          // copy
+	alg        unsafe.Pointer // copy
+	gc         unsafe.Pointer // copy
+	string     *string        // generate or copy?
+	*uncommonType
+	ptrToThis *rtype
+}
+
+type method struct {
+	name    *string
+	pkgPath *string
+	mtyp    *rtype
+	typ     *rtype
+	ifn     unsafe.Pointer
+	tfn     unsafe.Pointer
+}
+
+type uncommonType struct {
+	name    *string   // generate or copy?
+	pkgPath *string   // copy
+	methods []method // generate as a combo of interfaces
+}
+
+type eface struct {
+	rtype *rtype
+	data  unsafe.Pointer
+}
+
+type RemoteObject {
+	connection *Connection
+	id uint32
+	isPromise bool
+	ops []uint16
+}
+
+func md5sum(str string) uint32 {
+	h := md5.New()
+	io.WriteString(h, str)
+	return binary.LittleEndian.Uint32(h.Sum(nil))
+}
+
+type []uint64 u64list
+
+func (s u64list) Len() int {return len(s)}
+func (s u64list) Less(i, j int) bool { return s[i] < s[j] }
+func (s u64list) Swap(i, j int) { tmp := s[i]; s[i] = s[j]; s[j] = tmp }
+
+func compareU64List(a, b u64list) bool {
+	if len(a) != len(b) {
+		return len(a) - len(b)
+	}
+
+	for i := range a {
+		if a[i] > b[i] {
+			return 1
+		} else if a[i] < b[i] {
+			return -1
+		}
+	}
+
+	return 0
+}
+
+type remote_type struct {
+	buf []uintptr
+	typ *rtype
+	ids u64list
+}
+
+var empty_interface = (interface{})(RemoteObject{})
+var empty_type = (*eface)(unsafe.Pointer(&empty_interface).rtype
+var types = rbtree.NewTree()
+
+func getType(ids u64list) *rtype {
+	for i := 0; i < len(ids); {
+		if id_to_iface(
+	}
+	sort.Sort(ids)
+	rt := &remote_type{nil, nil, ids)
+
+	if types.Insert(rt) {
+		rt.makeType(
+	} else {
+	}
+
+}
+
+func (r *remote_type) makeType() {
+	methods := methods{}
+	for _, id := range r.ids {
+		if t, ok := id_to_iface[id]; ok {
+			eface = (*eface)(unsafe.Pointer(&t))
+			methods = append(methods, eface.rtype.methods)
+		}
+	}
+
+	sort.Sort(methods)
+
+	r.buf = make([]uintptr, (sizeof(rtype{}) + sizeof(uncommonType{}) + sizeof(method{}) * uintptr(len(methods))) / sizeof(uintptr(0)))
+	bufhdr := (*slice)(unsafe.Pointer(&r.buf))
+
+	t := (*rtype)(unsafe.Pointer(bufhdr.Data))
+	t_extra := (*uncommonType)(unsafe.Pointer(bufhdr.Data + sizeof(rtype{})))
+	t_methods_data := uintptr(unsafe.Pointer(bufhdr.Data + sizeof(rtype{}) + sizeof(uncommonType{})))
+
+	*t = *empty_type
+	*t_extra = *empty_type.uncommonType
+
+	t.hash = md5sum(name)
+	t.string = &name
+	t.uncommonType.name = &name
+
+	t_methods := (*reflect.SliceHeader)(unsafe.Pointer(&ret.methods))
+	t_methods.Data = ret_methods_data
+	t_methods.Len = len(t.methods)
+	t_methods.Cap = len(t.methods)
+
+	copy(t.methods, methods)
+	sort.Sort(methods(t.methods))
+
+	r.typ = t
+}
+
+var iface_to_id := map[*rtype]uint64
+var id_to_iface := map[uint64]interface{}
+
+func RegisterInterface(id uint64, remote Interface) {
+	iface := (interface{})(remote)
+	eface := (*eface)(unsafe.Pointer(&iface))
+	id_to_iface[id] = iface
+	iface_to_id[eface.rtype] = id
+}
+
+func (s *Segment) readInterface(off int) Interface {
+	desc := rpc.CapDescriptor(s.readPtr(off))
+	if desc.typ != typeDescriptor {
+		return nil
+	}
+
+	switch desc.which() {
+	case CAPDESCRIPTOR_SENDERHOSTED:
+		desc.typ = TypeExport
+		desc.id = desc.SenderHosted().Id()
+
+		desc.exports = desc.Interfaces().ToUInt64List()
+	}
+}
+
+func (s *Segment) writeInterface(off int, p Interface) error {
+	ro, rok := p.(RemoteObject)
+	rc, cok := s.Message.(*Connection)
+
+	desc := rpc.NewCapDescriptor(s)
+	desc.typ = TypeInterface
+
+	if rok && cok && rok.connection == rc {
+		// Remote object on this connection
+		if ro.isPromise {
+			ans := rpc.NewPromisedAnswer(s)
+			ans.SetQuestionId(ro.id)
+
+			ops := rpc.NewOpList(len(ro.ops))
+			for i, op := range ro.ops {
+				ops.At(i).SetGetPointerField(op)
+			}
+			ans.SetTransform(ops)
+
+			desc.SetReceiverAnswer(ans)
+		} else {
+			desc.SetReceiverHosted(ro.id)
+		}
+	} else {
+		// local or third party object that we will have to proxy
+		// TODO: thirdPartyHosted
+		desc.SetSenderHosted()
+		desc.SenderHosted().SetId(s.Message.GetExportId(p))
+
+		ifaces := NewUInt64List(s)
+		for i, id := range p.Exports(s.Message, primary) {
+			ifaces.Set(i, id)
+		}
+		desc.SenderHosted().SetInterfaces(ifaces)
+	}
+
+	return s.writePtr(off, Object(desc), nil, 0)
 }
