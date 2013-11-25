@@ -35,15 +35,20 @@ const (
 	TypePromise
 )
 
+type Interface interface {
+	Exports() []uint64
+}
+
 type Connection interface {
 	Send(msg *Segment)
 	Receive() *Segment
+	ToCapDescriptor(iface Interface) Object
 }
 
 type Message interface {
 	NewSegment(minsz int) (*Segment, error)
 	Lookup(segid uint32) (*Segment, error)
-	GetExportId(p Interface) uint32
+	Wait() error
 }
 
 type Segment struct {
@@ -60,11 +65,9 @@ type Object struct {
 	ptrs    int
 	typ     ObjectType
 	flags   uint
-	id uint32
-	exports []uint64
+	promise []uint16
 }
 
-type Void struct{}
 type Struct Object
 type VoidList Object
 type BitList Object
@@ -81,6 +84,50 @@ type Float64List Object
 type PointerList Object
 type TextList Object
 type DataList Object
+
+type Void Object
+type Int8 Object
+type UInt8 Object
+type Int16 Object
+type UInt16 Object
+type Int32 Object
+type UInt32 Object
+type Int64 Object
+type UInt64 Object
+type Float32 Object
+type Float64 Object
+type Text Object
+type Data Object
+
+func (p Void) Resolve() error { return Object(p).Resolve() }
+func (p Int8) Resolve() error { return Object(p).Resolve() }
+func (p UInt8) Resolve() error { return Object(p).Resolve() }
+func (p Int16) Resolve() error { return Object(p).Resolve() }
+func (p UInt16) Resolve() error { return Object(p).Resolve() }
+func (p Int32) Resolve() error { return Object(p).Resolve() }
+func (p UInt32) Resolve() error { return Object(p).Resolve() }
+func (p Int64) Resolve() error { return Object(p).Resolve() }
+func (p UInt64) Resolve() error { return Object(p).Resolve() }
+func (p Float32) Resolve() error { return Object(p).Resolve() }
+func (p Float64) Resolve() error { return Object(p).Resolve() }
+func (p Text) Resolve() error { return Object(p).Resolve() }
+func (p Data) Resolve() error { return Object(p).Resolve() }
+
+func (p VoidList) Resolve() error {return Object(p).Resolve() }
+func (p BitList) Resolve() error {return Object(p).Resolve() }
+func (p Int8List) Resolve() error {return Object(p).Resolve() }
+func (p UInt8List) Resolve() error {return Object(p).Resolve() }
+func (p Int16List) Resolve() error {return Object(p).Resolve() }
+func (p UInt16List) Resolve() error {return Object(p).Resolve() }
+func (p Int32List) Resolve() error {return Object(p).Resolve() }
+func (p UInt32List) Resolve() error {return Object(p).Resolve() }
+func (p Float32List) Resolve() error {return Object(p).Resolve() }
+func (p Int64List) Resolve() error {return Object(p).Resolve() }
+func (p UInt64List) Resolve() error {return Object(p).Resolve() }
+func (p Float64List) Resolve() error {return Object(p).Resolve() }
+func (p PointerList) Resolve() error {return Object(p).Resolve() }
+func (p TextList) Resolve() error {return Object(p).Resolve() }
+func (p DataList) Resolve() error {return Object(p).Resolve() }
 
 func (p VoidList) Len() int    { return p.length }
 func (p BitList) Len() int     { return p.length }
@@ -99,6 +146,7 @@ func (p TextList) Len() int    { return p.length }
 func (p DataList) Len() int    { return p.length }
 
 func (p Object) HasData() bool {
+	p.Resolve()
 	switch p.typ {
 	case TypeList:
 		return p.length > 0 && (p.datasz != 0 || p.ptrs != 0)
@@ -126,24 +174,40 @@ const (
 	hasPointerTag   = 128
 )
 
-func (s *Segment) Root(off int) Object {
-	if off+8 > len(s.Data) {
+func (s *Segment) ReadTag(off int) Object {
+	if 8*off >= len(s.Data) {
 		return Object{}
 	}
-	return s.readPtr(off)
+	return s.readPtr(8*off)
 }
 
-func (s *Segment) NewRoot() (PointerList, int, error) {
-	n, err := s.create(8, Object{typ: TypePointerList, length: 1, ptrs: 1, flags: isRoot})
-	return PointerList(n), n.off / 8, err
+func (s *Segment) NewTag() (PointerList, int) {
+	n, _ := s.create(8, Object{typ: TypePointerList, length: 1, ptrs: 1, flags: isRoot})
+	return PointerList(n), n.off / 8
 }
 
-func (s *Segment) NewText(v string) Object {
+func (s *Segment) Root() Object {
+	s = s.Message.LookupSegment(0)
+	if len(s.Data) < 8 {
+		panic("first segment doesn't have a root")
+	}
+	return s.readPtr(0)
+}
+
+func (s *Segment) SetRoot(obj Object) error {
+	s = s.Message.LookupSegment(0)
+	if len(s.Data) < 8 {
+		panic("first segment doesn't have a root")
+	}
+	return s.writePtr(0, obj)
+}
+
+func (s *Segment) NewText(v string) Text {
 	n := s.NewUInt8List(len(v) + 1)
 	copy(n.Segment.Data[n.off:], v)
 	return Object(n)
 }
-func (s *Segment) NewData(v []byte) Object {
+func (s *Segment) NewData(v []byte) Data {
 	n := s.NewUInt8List(len(v))
 	copy(n.Segment.Data[n.off:], v)
 	return Object(n)
@@ -193,16 +257,6 @@ func (s *Segment) NewCompositeList(datasz, ptrs, length int) PointerList {
 	return PointerList(n)
 }
 
-func (s *Segment) NewRootStruct(datasz, ptrs int) Struct {
-	r, _, err := s.NewRoot()
-	if err != nil {
-		return Struct{}
-	}
-	v := s.NewStruct(datasz, ptrs)
-	r.Set(0, Object(v))
-	return v
-}
-
 func (s *Segment) NewStruct(datasz, ptrs int) Struct {
 	if datasz < 0 || datasz > maxDataSize || ptrs < 0 || ptrs > maxPtrs {
 		return Struct{}
@@ -223,6 +277,10 @@ func (s *Segment) create(sz int, n Object) (Object, error) {
 		s = NewBuffer(nil)
 	}
 
+	if (len(s.Data) % 8) != 0 {
+		panic("non 8 byte aligned segment")
+	}
+
 	tag := false
 	if len(s.Data)+sz > cap(s.Data) {
 		// If we can't fit the data in the current segment, we always
@@ -234,6 +292,10 @@ func (s *Segment) create(sz int, n Object) (Object, error) {
 		news, err := s.Message.NewSegment(sz)
 		if err != nil {
 			return Object{}, err
+		}
+
+		if (len(news.Data) % 8) != 0 {
+			panic("non 8 byte aligned segment")
 		}
 
 		// NewSegment is allowed to grow the segment and return it. In
@@ -266,23 +328,26 @@ func (s *Segment) create(sz int, n Object) (Object, error) {
 func (p Object) Type() ObjectType { return p.typ }
 
 func (p Object) ToStruct() Struct {
-	if p.typ == TypeStruct {
+	switch p.typ {
+	case TypeStruct, TypePromise:
 		return Struct(p)
-	} else {
+	default:
 		return Struct{}
 	}
 }
 
 func (p Object) ToStructDefault(s *Segment, tagoff int) Struct {
-	if p.typ == TypeStruct {
+	switch p.typ {
+	case TypeStruct, TypePromise:
 		return Struct(p)
-	} else {
+	default:
 		return s.Root(tagoff).ToStruct()
 	}
 }
 
 func (p Object) ToText() string { return p.ToTextDefault("") }
 func (p Object) ToTextDefault(def string) string {
+	p.Resolve()
 	if p.typ != TypeList || p.datasz != 1 || p.length == 0 || p.Segment.Data[p.off+p.length-1] != 0 {
 		return def
 	}
@@ -292,6 +357,7 @@ func (p Object) ToTextDefault(def string) string {
 
 func (p Object) ToData() []byte { return p.ToDataDefault(nil) }
 func (p Object) ToDataDefault(def []byte) []byte {
+	p.Resolve()
 	if p.typ != TypeList || p.datasz != 1 {
 		return def
 	}
@@ -304,21 +370,21 @@ func (p Object) ToDataDefault(def []byte) []byte {
 // 2. Its TypeStruct, but then the length is 0
 // 3. Its TypeNull, but then the length is 0
 
-func (p Object) ToVoidList() VoidList       { return VoidList(p) }
-func (p Object) ToBitList() BitList         { return BitList(p) }
-func (p Object) ToInt8List() Int8List       { return Int8List(p) }
-func (p Object) ToUInt8List() UInt8List     { return UInt8List(p) }
-func (p Object) ToInt16List() Int16List     { return Int16List(p) }
-func (p Object) ToUInt16List() UInt16List   { return UInt16List(p) }
-func (p Object) ToInt32List() Int32List     { return Int32List(p) }
-func (p Object) ToUInt32List() UInt32List   { return UInt32List(p) }
-func (p Object) ToFloat32List() Float32List { return Float32List(p) }
-func (p Object) ToInt64List() Int64List     { return Int64List(p) }
-func (p Object) ToUInt64List() UInt64List   { return UInt64List(p) }
-func (p Object) ToFloat64List() Float64List { return Float64List(p) }
-func (p Object) ToPointerList() PointerList { return PointerList(p) }
-func (p Object) ToTextList() TextList       { return TextList(p) }
-func (p Object) ToDataList() DataList       { return DataList(p) }
+func (p Object) ToVoidList() VoidList       { Object(p).Resolve(); return VoidList(p) }
+func (p Object) ToBitList() BitList         { Object(p).Resolve(); return BitList(p) }
+func (p Object) ToInt8List() Int8List       { Object(p).Resolve(); return Int8List(p) }
+func (p Object) ToUInt8List() UInt8List     { Object(p).Resolve(); return UInt8List(p) }
+func (p Object) ToInt16List() Int16List     { Object(p).Resolve(); return Int16List(p) }
+func (p Object) ToUInt16List() UInt16List   { Object(p).Resolve(); return UInt16List(p) }
+func (p Object) ToInt32List() Int32List     { Object(p).Resolve(); return Int32List(p) }
+func (p Object) ToUInt32List() UInt32List   { Object(p).Resolve(); return UInt32List(p) }
+func (p Object) ToFloat32List() Float32List { Object(p).Resolve(); return Float32List(p) }
+func (p Object) ToInt64List() Int64List     { Object(p).Resolve(); return Int64List(p) }
+func (p Object) ToUInt64List() UInt64List   { Object(p).Resolve(); return UInt64List(p) }
+func (p Object) ToFloat64List() Float64List { Object(p).Resolve(); return Float64List(p) }
+func (p Object) ToPointerList() PointerList { Object(p).Resolve(); return PointerList(p) }
+func (p Object) ToTextList() TextList       { Object(p).Resolve(); return TextList(p) }
+func (p Object) ToDataList() DataList       { Object(p).Resolve(); return DataList(p) }
 
 func (p Object) ToListDefault(s *Segment, tagoff int) Object {
 	switch p.typ {
@@ -338,20 +404,27 @@ func (p Object) ToObjectDefault(s *Segment, tagoff int) Object {
 }
 
 func (p Struct) GetObject(off int) Object {
-	if uint(off) < uint(p.ptrs) {
-		return p.Segment.readPtr(p.off + p.datasz + off*8)
-	} else {
+	if p.typ == TypePromise {
+		r := make([]uint16, len(p.promise), len(p.promise)+1)
+		copy(r, p.promise)
+		return Object{Segment: p.Segment, typ: TypePromise, promise: append(r, uint16(off))}
+	} else if uint(off) >= uint(p.ptrs) {
 		return Object{}
+	} else {
+		return p.Segment.readPtr(p.off + p.datasz + off*8)
 	}
 }
 
-func (p Struct) SetObject(i int, tgt Object) {
+func (p Struct) SetObject(i int, tgt Object) error {
 	if uint(i) < uint(p.ptrs) {
-		p.Segment.writePtr(p.off+p.datasz+i*8, tgt, nil, 0)
+		return p.Segment.writePtr(p.off+p.datasz+i*8, tgt, nil, 0)
+	} else {
+		return ErrOutOfBounds
 	}
 }
 
 func (p Struct) Get1(bitoff int) bool {
+	Object(p).Resolve()
 	off := uint(p.off*8 + bitoff)
 
 	if bitoff == 0 && (p.flags&isBitListMember) != 0 {
@@ -380,6 +453,7 @@ func (p Struct) Set1(bitoff int, v bool) {
 }
 
 func (p Struct) Get8(off int) uint8 {
+	Object(p).Resolve()
 	if off < p.datasz {
 		return p.Segment.Data[uint(p.off)+uint(off)]
 	} else {
@@ -388,6 +462,7 @@ func (p Struct) Get8(off int) uint8 {
 }
 
 func (p Struct) Get16(off int) uint16 {
+	Object(p).Resolve()
 	if off < p.datasz {
 		return little16(p.Segment.Data[uint(p.off)+uint(off):])
 	} else {
@@ -396,6 +471,7 @@ func (p Struct) Get16(off int) uint16 {
 }
 
 func (p Struct) Get32(off int) uint32 {
+	Object(p).Resolve()
 	if off < p.datasz {
 		return little32(p.Segment.Data[uint(p.off)+uint(off):])
 	} else {
@@ -404,6 +480,7 @@ func (p Struct) Get32(off int) uint32 {
 }
 
 func (p Struct) Get64(off int) uint64 {
+	Object(p).Resolve()
 	if off < p.datasz {
 		return little64(p.Segment.Data[uint(p.off)+uint(off):])
 	} else {
@@ -738,8 +815,8 @@ func (p PointerList) At(i int) Object {
 	}
 }
 
-func (p TextList) Set(i int, v string) { PointerList(p).Set(i, p.Segment.NewText(v)) }
-func (p DataList) Set(i int, v []byte) { PointerList(p).Set(i, p.Segment.NewData(v)) }
+func (p TextList) Set(i int, v string) { PointerList(p).Set(i, Object(p.Segment.NewText(v))) }
+func (p DataList) Set(i int, v []byte) { PointerList(p).Set(i, Object(p.Segment.NewData(v))) }
 func (p PointerList) Set(i int, tgt Object) error {
 	if i < 0 || i >= p.length {
 		return nil
@@ -812,6 +889,90 @@ const (
 	compositeList = 7
 )
 
+func (s *Segment) interpretList(off int, val uint64) Object {
+	offw := off/8 + 1 + int(uint32(val))>>2
+	if offw < 0 || offw >= len(s.Data)/8 {
+		return Object{}
+	}
+
+	p := Object{
+		Segment: s,
+		typ:     TypeList,
+		off:     offw * 8,
+		length:  int(uint32(val >> 35)),
+	}
+
+	words := p.length
+
+	switch (val >> 32) & 7 {
+	case bit1List:
+		p.typ = TypeBitList
+		words = (p.length + 63) / 64
+	case byte1List:
+		p.datasz = 1
+		words = (p.length + 7) / 8
+	case byte2List:
+		p.datasz = 2
+		words = (p.length + 3) / 4
+	case byte4List:
+		p.datasz = 4
+		words = (p.length + 1) / 2
+	case byte8List:
+		p.datasz = 8
+	case pointerList:
+		p.typ = TypePointerList
+	case compositeList:
+		hdr := little64(p.Segment.Data[p.off:])
+		p.off += 8
+		if hdr&2 != structPointer {
+			return Object{}
+		}
+
+		p.flags |= isCompositeList
+		p.length = int(uint32(hdr) >> 2)
+		p.datasz = int(uint16(hdr>>32)) * 8
+		p.ptrs = int(uint16(hdr >> 48))
+
+		// Jump up to 64bit as length is 30 bits, datasz+ptrs is 17 bit
+		if uint64(p.length)*uint64(p.datasz/8+p.ptrs) != uint64(words) {
+			return Object{}
+		}
+	}
+
+	// Largest possible message is 30 bits * 1 word, with either a
+	// composite, ptr, or 8 byte list. If we do a size check using
+	// bits or bytes, we overflow.
+	if words > len(s.Data)/8-offw {
+		return Object{}
+	}
+
+	return p
+}
+
+func (s *Segment) interpretStruct(off int, val uint64) Object {
+	// Be wary of overflow. Offset is 30 bits signed. List size is 29 bits
+	// unsigned. For both of these we need to check in terms of words if
+	// using 32 bit maths as bits or bytes will overflow.
+	offw := off/8 + 1 + int(uint32(val)>>2)
+	if offw < 0 || offw >= len(s.Data)/8 {
+		return Object{}
+	}
+
+	p := Object{
+		Segment: s,
+		typ:     TypeStruct,
+		off:     offw * 8,
+		datasz:  int(uint16(val>>32)) * 8,
+		ptrs:    int(uint16(val >> 48)),
+	}
+
+	if p.off+p.datasz+p.ptrs*8 > len(s.Data) {
+		return Object{}
+	}
+
+	return p
+}
+
 func (s *Segment) readPtr(off int) Object {
 	var err error
 	val := little64(s.Data[off:])
@@ -861,89 +1022,16 @@ func (s *Segment) readPtr(off int) Object {
 		val = little64(s.Data[faroff:])
 	}
 
-	// Be wary of overflow. Offset is 30 bits signed. List size is 29 bits
-	// unsigned. For both of these we need to check in terms of words if
-	// using 32 bit maths as bits or bytes will overflow.
-	switch val & 3 {
+
+	switch val & 7 {
 	case structPointer:
-		offw := off/8 + 1 + int(uint32(val)>>2)
-		if offw < 0 || offw >= len(s.Data)/8 {
-			return Object{}
-		}
-
-		p := Object{
-			Segment: s,
-			typ:     TypeStruct,
-			off:     offw * 8,
-			datasz:  int(uint16(val>>32)) * 8,
-			ptrs:    int(uint16(val >> 48)),
-		}
-
-		if p.off+p.datasz+p.ptrs*8 > len(s.Data) {
-			return Object{}
-		}
-
-		return p
-
+		return s.interpretStruct(off, val)
 	case listPointer:
-		offw := off/8 + 1 + int(uint32(val))>>2
-		if offw < 0 || offw >= len(s.Data)/8 {
-			return Object{}
-		}
-
-		p := Object{
-			Segment: s,
-			typ:     TypeList,
-			off:     offw * 8,
-			length:  int(uint32(val >> 35)),
-		}
-
-		words := p.length
-
-		switch (val >> 32) & 7 {
-		case bit1List:
-			p.typ = TypeBitList
-			words = (p.length + 63) / 64
-		case byte1List:
-			p.datasz = 1
-			words = (p.length + 7) / 8
-		case byte2List:
-			p.datasz = 2
-			words = (p.length + 3) / 4
-		case byte4List:
-			p.datasz = 4
-			words = (p.length + 1) / 2
-		case byte8List:
-			p.datasz = 8
-		case pointerList:
-			p.typ = TypePointerList
-		case compositeList:
-			hdr := little64(p.Segment.Data[p.off:])
-			p.off += 8
-			if hdr&2 != structPointer {
-				return Object{}
-			}
-
-			p.flags |= isCompositeList
-			p.length = int(uint32(hdr) >> 2)
-			p.datasz = int(uint16(hdr>>32)) * 8
-			p.ptrs = int(uint16(hdr >> 48))
-
-			// Jump up to 64bit as length is 30 bits, datasz+ptrs is 17 bit
-			if uint64(p.length)*uint64(p.datasz/8+p.ptrs) != uint64(words) {
-				return Object{}
-			}
-		}
-
-		// Largest possible message is 30 bits * 1 word, with either a
-		// composite, ptr, or 8 byte list. If we do a size check using
-		// bits or bytes, we overflow.
-		if words > len(s.Data)/8-offw {
-			return Object{}
-		}
-
+		return s.interpretList(off, val)
+	case interfacePointer:
+		p := s.interpretStruct(off, val)
+		p.typ = TypeInterface
 		return p
-
 	default:
 		return Object{}
 	}
@@ -1200,9 +1288,41 @@ func (s *Segment) writePtr(off int, p Object, copies *rbtree.Tree, depth int) er
 	}
 }
 
-type Interface interface {
-	Exports(s Message, primary uint64) []uint64
+func (p *Object) doResolve() error {
+	if err := p.Segment.Message.Wait(); err != nil {
+		*p = Object{}
+		return p.err
+	}
+
+	s := p.Segment.Root(0).At(0)
+	if s.typ != TypeStruct {
+		*p = Object{}
+		return ErrInvalidReturn
+	}
+
+	for _, off := range p.promise[1:] {
+		s = Struct(s).GetObject(int(off))
+		if s.typ != TypeStruct {
+			*p = Object{}
+			return ErrInvalidReturn
+		}
+	}
+
+	p.typ = s.typ
+	p.off += s.off
+	p.datasz = s.datasz
+	p.ptrs = s.ptrs
+	p.length = s.length
+	return nil
 }
+
+func (p *Object) Resolve() error {
+	if p.typ == TypePromise {
+		return p.doResolve()
+	}
+	return nil
+}
+
 
 type rtype struct {
 	size       uintptr        // copy

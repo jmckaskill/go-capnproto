@@ -40,8 +40,7 @@ func assert(chk bool, format string, a ...interface{}) {
 }
 
 func copyData(obj C.Object) int {
-	r, off, err := g_segment.NewRoot()
-	assert(err == nil, "%v\n", err)
+	r, off := g_segment.NewTag()
 	err = r.Set(0, obj)
 	assert(err == nil, "%v\n", err)
 	return off
@@ -216,10 +215,10 @@ func (n *node) writeValue(w io.Writer, t Type, v Value) {
 		}
 
 	case TYPE_STRUCT:
-		fprintf(w, "%s(%s.Root(%d))", findNode(t.Struct().TypeId()).remoteName(n), g_bufname, copyData(v.Struct()))
+		fprintf(w, "%s(%s.ReadTag(%d))", findNode(t.Struct().TypeId()).remoteName(n), g_bufname, copyData(v.Struct()))
 
 	case TYPE_OBJECT:
-		fprintf(w, "%s.Root(%d)", g_bufname, copyData(v.Object()))
+		fprintf(w, "%s.ReadTag(%d)", g_bufname, copyData(v.Object()))
 
 	case TYPE_LIST:
 		assert(v.which() == VALUE_LIST, "expected list value")
@@ -228,37 +227,37 @@ func (n *node) writeValue(w io.Writer, t Type, v Value) {
 		case TYPE_VOID, TYPE_INTERFACE:
 			fprintf(w, "make([]C.Void, %d)", v.List().ToVoidList().Len())
 		case TYPE_BOOL:
-			fprintf(w, "C.BitList(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.BitList(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_INT8:
-			fprintf(w, "C.Int8List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Int8List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_UINT8:
-			fprintf(w, "C.UInt8List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.UInt8List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_INT16:
-			fprintf(w, "C.Int16List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Int16List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_UINT16:
-			fprintf(w, "C.UInt16List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.UInt16List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_INT32:
-			fprintf(w, "C.Int32List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Int32List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_UINT32:
-			fprintf(w, "C.UInt32List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.UInt32List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_FLOAT32:
-			fprintf(w, "C.Float32List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Float32List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_INT64:
-			fprintf(w, "C.Int64List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Int64List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_UINT64:
-			fprintf(w, "C.UInt64List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.UInt64List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_FLOAT64:
-			fprintf(w, "C.Float64List(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.Float64List(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_TEXT:
-			fprintf(w, "C.TextList(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.TextList(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_DATA:
-			fprintf(w, "C.DataList(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.DataList(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		case TYPE_ENUM:
-			fprintf(w, "%s_List(%s.Root(%d))", findNode(lt.Enum().TypeId()).remoteName(n), g_bufname, copyData(v.List()))
+			fprintf(w, "%s_List(%s.ReadTag(%d))", findNode(lt.Enum().TypeId()).remoteName(n), g_bufname, copyData(v.List()))
 		case TYPE_STRUCT:
-			fprintf(w, "%s_List(%s.Root(%d))", findNode(lt.Struct().TypeId()).remoteName(n), g_bufname, copyData(v.List()))
+			fprintf(w, "%s_List(%s.ReadTag(%d))", findNode(lt.Struct().TypeId()).remoteName(n), g_bufname, copyData(v.List()))
 		case TYPE_LIST, TYPE_OBJECT:
-			fprintf(w, "C.PointerList(%s.Root(%d))", g_bufname, copyData(v.List()))
+			fprintf(w, "C.PointerList(%s.ReadTag(%d))", g_bufname, copyData(v.List()))
 		}
 	}
 }
@@ -654,9 +653,9 @@ func (n *node) defineNewStructFunc(w io.Writer) {
 
 	fprintf(w, "func New%s(s *C.Segment) %s { return %s(s.NewStruct(%d, %d)) }\n",
 		n.name, n.name, n.name, n.Struct().DataWordCount()*8, n.Struct().PointerCount())
-	fprintf(w, "func NewRoot%s(s *C.Segment) %s { return %s(s.NewRootStruct(%d, %d)) }\n",
-		n.name, n.name, n.name, n.Struct().DataWordCount()*8, n.Struct().PointerCount())
-	fprintf(w, "func ReadRoot%s(s *C.Segment) %s { return %s(s.Root(0).ToStruct()) }\n",
+	fpritnf(w, "func WriteRoot%s(s *C.Segment, v %s) error { return s.SetRoot(Object(v)) }\n",
+		n.name, n.name)
+	fprintf(w, "func ReadRoot%s(s *C.Segment) %s { return %s(s.Root().ToStruct()) }\n",
 		n.name, n.name, n.name)
 }
 

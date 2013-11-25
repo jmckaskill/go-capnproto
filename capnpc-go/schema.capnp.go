@@ -26,8 +26,7 @@ const (
 )
 
 func NewNode(s *C.Segment) Node                             { return Node(s.NewStruct(40, 5)) }
-func NewRootNode(s *C.Segment) Node                         { return Node(s.NewRootStruct(40, 5)) }
-func ReadRootNode(s *C.Segment) Node                        { return Node(s.Root(0).ToStruct()) }
+func ReadRootNode(s *C.Segment) Node                        { return Node(s.Root().ToStruct()) }
 func (s Node) which() Node_which                            { return Node_which(C.Struct(s).Get16(12)) }
 func (s Node) Id() uint64                                   { return C.Struct(s).Get64(0) }
 func (s Node) SetId(v uint64)                               { C.Struct(s).Set64(0, v) }
@@ -110,8 +109,7 @@ func (s Node_List) ToArray() []Node              { return *(*[]Node)(unsafe.Poin
 type NodeNestedNode C.Struct
 
 func NewNodeNestedNode(s *C.Segment) NodeNestedNode      { return NodeNestedNode(s.NewStruct(8, 1)) }
-func NewRootNodeNestedNode(s *C.Segment) NodeNestedNode  { return NodeNestedNode(s.NewRootStruct(8, 1)) }
-func ReadRootNodeNestedNode(s *C.Segment) NodeNestedNode { return NodeNestedNode(s.Root(0).ToStruct()) }
+func ReadRootNodeNestedNode(s *C.Segment) NodeNestedNode { return NodeNestedNode(s.Root().ToStruct()) }
 func (s NodeNestedNode) Name() string                    { return C.Struct(s).GetObject(0).ToText() }
 func (s NodeNestedNode) SetName(v string)                { C.Struct(s).SetObject(0, s.Segment.NewText(v)) }
 func (s NodeNestedNode) Id() uint64                      { return C.Struct(s).Get64(0) }
@@ -149,8 +147,7 @@ const (
 )
 
 func NewField(s *C.Segment) Field                { return Field(s.NewStruct(24, 4)) }
-func NewRootField(s *C.Segment) Field            { return Field(s.NewRootStruct(24, 4)) }
-func ReadRootField(s *C.Segment) Field           { return Field(s.Root(0).ToStruct()) }
+func ReadRootField(s *C.Segment) Field           { return Field(s.Root().ToStruct()) }
 func (s Field) which() Field_which               { return Field_which(C.Struct(s).Get16(8)) }
 func (s Field) Name() string                     { return C.Struct(s).GetObject(0).ToText() }
 func (s Field) SetName(v string)                 { C.Struct(s).SetObject(0, s.Segment.NewText(v)) }
@@ -187,8 +184,7 @@ func (s Field_List) ToArray() []Field              { return *(*[]Field)(unsafe.P
 type Enumerant C.Struct
 
 func NewEnumerant(s *C.Segment) Enumerant            { return Enumerant(s.NewStruct(8, 2)) }
-func NewRootEnumerant(s *C.Segment) Enumerant        { return Enumerant(s.NewRootStruct(8, 2)) }
-func ReadRootEnumerant(s *C.Segment) Enumerant       { return Enumerant(s.Root(0).ToStruct()) }
+func ReadRootEnumerant(s *C.Segment) Enumerant       { return Enumerant(s.Root().ToStruct()) }
 func (s Enumerant) Name() string                     { return C.Struct(s).GetObject(0).ToText() }
 func (s Enumerant) SetName(v string)                 { C.Struct(s).SetObject(0, s.Segment.NewText(v)) }
 func (s Enumerant) CodeOrder() uint16                { return C.Struct(s).Get16(0) }
@@ -210,8 +206,7 @@ func (s Enumerant_List) ToArray() []Enumerant {
 type Method C.Struct
 
 func NewMethod(s *C.Segment) Method               { return Method(s.NewStruct(8, 4)) }
-func NewRootMethod(s *C.Segment) Method           { return Method(s.NewRootStruct(8, 4)) }
-func ReadRootMethod(s *C.Segment) Method          { return Method(s.Root(0).ToStruct()) }
+func ReadRootMethod(s *C.Segment) Method          { return Method(s.Root().ToStruct()) }
 func (s Method) Name() string                     { return C.Struct(s).GetObject(0).ToText() }
 func (s Method) SetName(v string)                 { C.Struct(s).SetObject(0, s.Segment.NewText(v)) }
 func (s Method) CodeOrder() uint16                { return C.Struct(s).Get16(0) }
@@ -237,8 +232,7 @@ func (s Method_List) ToArray() []Method {
 type MethodParam C.Struct
 
 func NewMethodParam(s *C.Segment) MethodParam          { return MethodParam(s.NewStruct(0, 4)) }
-func NewRootMethodParam(s *C.Segment) MethodParam      { return MethodParam(s.NewRootStruct(0, 4)) }
-func ReadRootMethodParam(s *C.Segment) MethodParam     { return MethodParam(s.Root(0).ToStruct()) }
+func ReadRootMethodParam(s *C.Segment) MethodParam     { return MethodParam(s.Root().ToStruct()) }
 func (s MethodParam) Name() string                     { return C.Struct(s).GetObject(0).ToText() }
 func (s MethodParam) SetName(v string)                 { C.Struct(s).SetObject(0, s.Segment.NewText(v)) }
 func (s MethodParam) Type() Type                       { return Type(C.Struct(s).GetObject(1).ToStruct()) }
@@ -289,8 +283,7 @@ const (
 )
 
 func NewType(s *C.Segment) Type            { return Type(s.NewStruct(16, 1)) }
-func NewRootType(s *C.Segment) Type        { return Type(s.NewRootStruct(16, 1)) }
-func ReadRootType(s *C.Segment) Type       { return Type(s.Root(0).ToStruct()) }
+func ReadRootType(s *C.Segment) Type       { return Type(s.Root().ToStruct()) }
 func (s Type) which() Type_which           { return Type_which(C.Struct(s).Get16(0)) }
 func (s Type) List() TypeList              { return TypeList(s) }
 func (s Type) SetList()                    { C.Struct(s).Set16(0, 14) }
@@ -342,8 +335,7 @@ const (
 )
 
 func NewValue(s *C.Segment) Value      { return Value(s.NewStruct(16, 1)) }
-func NewRootValue(s *C.Segment) Value  { return Value(s.NewRootStruct(16, 1)) }
-func ReadRootValue(s *C.Segment) Value { return Value(s.Root(0).ToStruct()) }
+func ReadRootValue(s *C.Segment) Value { return Value(s.Root().ToStruct()) }
 func (s Value) which() Value_which     { return Value_which(C.Struct(s).Get16(0)) }
 func (s Value) Bool() bool             { return C.Struct(s).Get1(16) }
 func (s Value) SetBool(v bool)         { C.Struct(s).Set16(0, 1); C.Struct(s).Set1(16, v) }
@@ -402,8 +394,7 @@ func (s Value_List) ToArray() []Value              { return *(*[]Value)(unsafe.P
 type Annotation C.Struct
 
 func NewAnnotation(s *C.Segment) Annotation      { return Annotation(s.NewStruct(8, 1)) }
-func NewRootAnnotation(s *C.Segment) Annotation  { return Annotation(s.NewRootStruct(8, 1)) }
-func ReadRootAnnotation(s *C.Segment) Annotation { return Annotation(s.Root(0).ToStruct()) }
+func ReadRootAnnotation(s *C.Segment) Annotation { return Annotation(s.Root().ToStruct()) }
 func (s Annotation) Id() uint64                  { return C.Struct(s).Get64(0) }
 func (s Annotation) SetId(v uint64)              { C.Struct(s).Set64(0, v) }
 func (s Annotation) Value() Value                { return Value(C.Struct(s).GetObject(0).ToStruct()) }
@@ -449,11 +440,8 @@ type CodeGeneratorRequest C.Struct
 func NewCodeGeneratorRequest(s *C.Segment) CodeGeneratorRequest {
 	return CodeGeneratorRequest(s.NewStruct(0, 2))
 }
-func NewRootCodeGeneratorRequest(s *C.Segment) CodeGeneratorRequest {
-	return CodeGeneratorRequest(s.NewRootStruct(0, 2))
-}
 func ReadRootCodeGeneratorRequest(s *C.Segment) CodeGeneratorRequest {
-	return CodeGeneratorRequest(s.Root(0).ToStruct())
+	return CodeGeneratorRequest(s.Root().ToStruct())
 }
 func (s CodeGeneratorRequest) Nodes() Node_List     { return Node_List(C.Struct(s).GetObject(0)) }
 func (s CodeGeneratorRequest) SetNodes(v Node_List) { C.Struct(s).SetObject(0, C.Object(v)) }
@@ -482,11 +470,8 @@ type CodeGeneratorRequestRequestedFile C.Struct
 func NewCodeGeneratorRequestRequestedFile(s *C.Segment) CodeGeneratorRequestRequestedFile {
 	return CodeGeneratorRequestRequestedFile(s.NewStruct(8, 2))
 }
-func NewRootCodeGeneratorRequestRequestedFile(s *C.Segment) CodeGeneratorRequestRequestedFile {
-	return CodeGeneratorRequestRequestedFile(s.NewRootStruct(8, 2))
-}
 func ReadRootCodeGeneratorRequestRequestedFile(s *C.Segment) CodeGeneratorRequestRequestedFile {
-	return CodeGeneratorRequestRequestedFile(s.Root(0).ToStruct())
+	return CodeGeneratorRequestRequestedFile(s.Root().ToStruct())
 }
 func (s CodeGeneratorRequestRequestedFile) Id() uint64       { return C.Struct(s).Get64(0) }
 func (s CodeGeneratorRequestRequestedFile) SetId(v uint64)   { C.Struct(s).Set64(0, v) }
@@ -519,11 +504,8 @@ type CodeGeneratorRequestRequestedFileImport C.Struct
 func NewCodeGeneratorRequestRequestedFileImport(s *C.Segment) CodeGeneratorRequestRequestedFileImport {
 	return CodeGeneratorRequestRequestedFileImport(s.NewStruct(8, 1))
 }
-func NewRootCodeGeneratorRequestRequestedFileImport(s *C.Segment) CodeGeneratorRequestRequestedFileImport {
-	return CodeGeneratorRequestRequestedFileImport(s.NewRootStruct(8, 1))
-}
 func ReadRootCodeGeneratorRequestRequestedFileImport(s *C.Segment) CodeGeneratorRequestRequestedFileImport {
-	return CodeGeneratorRequestRequestedFileImport(s.Root(0).ToStruct())
+	return CodeGeneratorRequestRequestedFileImport(s.Root().ToStruct())
 }
 func (s CodeGeneratorRequestRequestedFileImport) Id() uint64     { return C.Struct(s).Get64(0) }
 func (s CodeGeneratorRequestRequestedFileImport) SetId(v uint64) { C.Struct(s).Set64(0, v) }

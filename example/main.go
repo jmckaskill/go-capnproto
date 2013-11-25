@@ -10,10 +10,12 @@ import (
 func main() {
 	// Write
 	s := capn.NewBuffer(nil)
-	d := NewRootZdate(s)
+	d := NewZdate(s)
 	d.SetYear(2004)
 	d.SetMonth(12)
 	d.SetDay(7)
+	WriteRootZDate(s, d)
+
 	buf := bytes.Buffer{}
 	s.WriteTo(&buf)
 

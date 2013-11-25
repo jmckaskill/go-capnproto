@@ -10,7 +10,7 @@ import (
 var (
 	errBufferCall     = errors.New("capn: can't call on a memory buffer")
 	ErrInvalidSegment = errors.New("capn: invalid segment id")
-	ErrTooMuchData    = errors.New("capn: too much data in stream")
+	ErrInvalidMessage    = errors.New("capn: error parsing message")
 )
 
 type buffer Segment
@@ -19,9 +19,13 @@ type buffer Segment
 // will expand the buffer. Data can be nil (or length 0 with some capacity) if
 // creating a new session. If parsing an existing segment than data should be
 // the segment contents and will not be copied.
-func NewBuffer(data []byte) *Segment {
+func NewBuffer(data []byte, segmax int) *Segment {
 	if uint64(len(data)) > uint64(math.MaxUint32) {
 		return nil
+	}
+
+	if len(data) < 8 {
+		data = append(data, make([]byte, 8)...)
 	}
 
 	b := &buffer{}
@@ -56,14 +60,19 @@ type multiBuffer struct {
 // is insufficient capacity. When parsing an existing message data should be
 // the list of segments. The data buffers will not be copied.
 func NewMultiBuffer(data [][]byte) *Segment {
+	if len(data) == 0 {
+		data = append(data, make([]byte, 8))
+	} else if len(data[0]) < 8 {
+		// invalid data without a root
+		return nil
+	}
+
 	m := &multiBuffer{make([]*Segment, len(data))}
 	for i, d := range data {
 		m.segments[i] = &Segment{m, d, uint32(i)}
 	}
-	if len(data) > 0 {
-		return m.segments[0]
-	}
-	return &Segment{m, nil, 0xFFFFFFFF}
+
+	return m.segments[0]
 }
 
 var (
@@ -110,7 +119,7 @@ func ReadFromStream(r io.Reader, buf *bytes.Buffer) (*Segment, error) {
 	}
 
 	if little32(buf.Bytes()[:]) >= uint32(MaxSegmentNumber) {
-		return nil, ErrTooMuchData
+		return nil, ErrInvalidMessage
 	}
 
 	segnum := int(little32(buf.Bytes()[:]) + 1)
@@ -120,11 +129,16 @@ func ReadFromStream(r io.Reader, buf *bytes.Buffer) (*Segment, error) {
 		return nil, err
 	}
 
+	if little32(buf.Bytes()[4:]) == 0 {
+		// no root
+		return nil, ErrInvalidMessage
+	}
+
 	total := 0
 	for i := 0; i < segnum; i++ {
 		sz := little32(buf.Bytes()[4*i+4:])
 		if uint64(total)+uint64(sz)*8 > uint64(MaxTotalSize) {
-			return nil, ErrTooMuchData
+			return nil, ErrInvalidMessage
 		}
 		total += int(sz) * 8
 	}
