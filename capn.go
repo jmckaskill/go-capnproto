@@ -31,7 +31,7 @@ const (
 	TypeList
 	TypePointerList
 	TypeBitList
-	TypeExport
+	TypeCapability
 	TypePromise
 )
 
@@ -45,10 +45,16 @@ type Connection interface {
 	ToCapDescriptor(iface Interface) Object
 }
 
+type Vat struct {
+	exports []Capability
+	imports []Capability
+	promisedAnswers []Capability
+}
+
 type Message interface {
 	NewSegment(minsz int) (*Segment, error)
 	Lookup(segid uint32) (*Segment, error)
-	Wait() error
+	AddCapability(cap Capability) (uint32, error)
 }
 
 type Segment struct {
@@ -57,8 +63,17 @@ type Segment struct {
 	Id      uint32
 }
 
+type promise struct {
+	ref int
+	obj CapDescriptor
+}
+
+type Capability struct {
+}
+
 type Object struct {
 	Segment *Segment
+	promise *promise
 	off     int // in bytes
 	length  int
 	datasz  int // in bytes

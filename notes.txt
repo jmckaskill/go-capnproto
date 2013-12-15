@@ -1,0 +1,36 @@
+Call
+- has a question ID
+- Can target either:
+	- known cap (import)
+	- promised answer
+		- includes question ID
+		- + path to cap
+
+Return
+- refers to a question ID
+
+Finish
+indicates we've received the return so that the caps can be optionally
+auto-released
+
+
+
+From a user perspective:
+
+root := get_root()
+
+// want only a single value returned so things can be chained
+promise := root.callFunc(...)
+
+promise hasn't been resolved at this point
+
+// foo is still a promise
+foo := promise.FooStruct()
+
+// cap is still a promise
+cap := foo.BarCap()
+
+// this can proceed immediately
+cap.callOtherFunc()
+
+
