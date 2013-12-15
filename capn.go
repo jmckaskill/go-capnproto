@@ -35,10 +35,6 @@ const (
 	TypePromise
 )
 
-type Interface interface {
-	Exports() []uint64
-}
-
 type Connection interface {
 	Send(msg *Segment)
 	Receive() *Segment
