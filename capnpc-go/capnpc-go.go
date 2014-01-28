@@ -669,6 +669,121 @@ func (n *node) defineStructFuncs(w io.Writer) {
 	}
 }
 
+// This writes the WriteJSON function.
+//
+// This is an unusual interface, but it was chosen because the types in go-capnproto
+// didn't match right to use the json.Marshaler interface.
+// This function recurses through the type, writing statements that will dump json to a wire
+// For all statements, the json encoder js and the bufio writer b will be in scope.
+// The value will be in scope as s. Some features need to redefine s, like unions.
+// In that case, Make a new block and redeclare s
+func (n *node) defineTypeJsonFuncs(w io.Writer) {
+	g_imported["io"] = true
+	g_imported["bufio"] = true
+	g_imported["bytes"] = true
+
+	fprintf(w, "func (s %s) WriteJSON(w io.Writer) error {\n", n.name)
+	fprintf(w, "b := bufio.NewWriter(w);")
+	fprintf(w, "var err error;")
+	fprintf(w, "var buf []byte;")
+	fprintf(w, "_ = buf;")
+
+	switch n.Which() {
+	case NODE_ENUM:
+		n.jsonEnum(w)
+	case NODE_STRUCT:
+		n.jsonStruct(w)
+	}
+
+	fprintf(w, "err = b.Flush(); return err\n};\n")
+
+	fprintf(w, "func (s %s) MarshalJSON() ([]byte, error) {\n", n.name)
+	fprintf(w, "b := bytes.Buffer{}; err := s.WriteJSON(&b); return b.Bytes(), err };")
+}
+
+func writeErrCheck(w io.Writer) {
+	fprintf(w, "if err != nil { return err; };")
+}
+
+func (n *node) jsonEnum(w io.Writer) {
+	g_imported["encoding/json"] = true
+	fprintf(w, `buf, err = json.Marshal(s.String());`)
+	writeErrCheck(w)
+	fprintf(w, "_, err = b.Write(buf);")
+	writeErrCheck(w)
+}
+
+// Write statements that will write a json struct
+func (n *node) jsonStruct(w io.Writer) {
+	fprintf(w, `err = b.WriteByte('{');`)
+	writeErrCheck(w)
+	for i, f := range n.codeOrderFields() {
+		if f.DiscriminantValue() != 0xFFFF {
+			enumname := fmt.Sprintf("%s_%s", strings.ToUpper(n.name), strings.ToUpper(f.Name()))
+			fprintf(w, "if s.Which() == %s {", enumname)
+		}
+		if i != 0 {
+			fprintf(w, `
+				err = b.WriteByte(',');
+			`)
+			writeErrCheck(w)
+		}
+		fprintf(w, `_, err = b.WriteString("\"%s\":");`, f.Name())
+		writeErrCheck(w)
+		f.json(w)
+		if f.DiscriminantValue() != 0xFFFF {
+			fprintf(w, "};")
+		}
+	}
+	fprintf(w, `err = b.WriteByte('}');`)
+	writeErrCheck(w)
+}
+
+// This function writes statements that write the fields json representation to the bufio.
+func (f *Field) json(w io.Writer) {
+	switch f.Which() {
+	case FIELD_SLOT:
+		fs := f.Slot()
+		fprintf(w, "{ s := s.%s(); ", title(f.Name()))
+		fs.Type().json(w)
+		fprintf(w, "}; ")
+	case FIELD_GROUP:
+		tid := f.Group().TypeId()
+		n := findNode(tid)
+		fprintf(w, "{ s := s.%s();", title(f.Name()))
+		n.jsonStruct(w)
+		fprintf(w, "};")
+	}
+}
+
+func (t Type) json(w io.Writer) {
+	switch t.Which() {
+	case TYPE_UINT8, TYPE_UINT16, TYPE_UINT32, TYPE_UINT64,
+		TYPE_INT8, TYPE_INT16, TYPE_INT32, TYPE_INT64,
+		TYPE_FLOAT32, TYPE_FLOAT64, TYPE_BOOL, TYPE_TEXT, TYPE_DATA:
+		g_imported["encoding/json"] = true
+		fprintf(w, "buf, err = json.Marshal(s);")
+		writeErrCheck(w)
+		fprintf(w, "_, err = b.Write(buf);")
+		writeErrCheck(w)
+	case TYPE_ENUM, TYPE_STRUCT:
+		// since we handle groups at the field level, only named struct types make it in here
+		// so we can just call the named structs json dumper
+		fprintf(w, "err = s.WriteJSON(b);")
+		writeErrCheck(w)
+	case TYPE_LIST:
+		fprintf(w, "{ err = b.WriteByte('[');")
+		writeErrCheck(w)
+		fprintf(w, "for i, s := range s.ToArray() {")
+		fprintf(w, `if i != 0 { _, err = b.WriteString(", "); };`)
+		writeErrCheck(w)
+		typ := t.List().ElementType()
+		typ.json(w)
+		fprintf(w, "}; err = b.WriteByte(']'); };")
+		writeErrCheck(w)
+	}
+}
+
 func (n *node) defineNewStructFunc(w io.Writer) {
 	assert(n.Which() == NODE_STRUCT, "invalid struct node")
 
@@ -765,12 +880,14 @@ func main() {
 			case NODE_ANNOTATION:
 			case NODE_ENUM:
 				n.defineEnum(&buf)
+				n.defineTypeJsonFuncs(&buf)
 			case NODE_STRUCT:
 				if !n.Struct().IsGroup() {
 					n.defineStructTypes(&buf, nil)
 					n.defineStructEnums(&buf)
 					n.defineNewStructFunc(&buf)
 					n.defineStructFuncs(&buf)
+					n.defineTypeJsonFuncs(&buf)
 					n.defineStructList(&buf)
 				}
 			}
