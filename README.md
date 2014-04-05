@@ -1,3 +1,5 @@
+No longer maintained - see https://github.com/glycerine/go-capnproto instead.
+
 License
 -------
 
